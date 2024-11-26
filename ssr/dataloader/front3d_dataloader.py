@@ -40,6 +40,8 @@ class Front3D_Recon_Dataset(Dataset):
         self.mask_filter = self.config['data']['mask_filter']
         self.bdb2d_filter = self.config['data']['bdb2d_filter']
         self.soft_pixels = self.config['data']['soft_pixels']
+        self.use_dino = self.config['model']['latent_feature']['encoder']['use_dino']
+        self.use_diffu_prior = self.config['model']['latent_feature']['encoder']['use_diffu_prior']
         if mode=="train":
             classnames = self.config['data']['train_class_name']
         elif mode == 'val':
@@ -81,6 +83,17 @@ class Front3D_Recon_Dataset(Dataset):
         self.use_global_encoder = self.config['model']['latent_feature']['use_global_encoder']
 
         self.use_cls_encoder = self.config['model']['latent_feature']['use_cls_encoder']
+        
+        # 加载dino的位置和信息
+        if self.use_dino:
+            dino_CLS_path = 'ssr/dino/dino_features768.pt'
+            self.dino_CLS_feat = torch.load(dino_CLS_path)
+            self.features = self.dino_CLS_feat['features']
+            self.img_names = self.dino_CLS_feat['img_name']
+
+        if self.use_diffu_prior:
+            self.diffu_prior_path = 'ssr/depth_anything/'
+            self.diffu_prior = None
 
     def __len__(self):
         return len(self.split)
@@ -88,6 +101,28 @@ class Front3D_Recon_Dataset(Dataset):
     def __getitem__(self, index):
         imgid, objid, cname = self.split[index]
         '''load the data dynamically or store them in the memory firstly'''
+        # 根据图像的名称来匹配dino特征信息
+        if self.use_dino:
+            img_name = imgid.split('/')[-1]
+            if img_name in self.img_names:
+                index = self.img_names.index(img_name)
+                # 获取对应的特征
+                self.dino_feat = self.features[index]
+            else:
+                print(f"Image name {img_name} not found in DINO features.")
+
+        if self.use_diffu_prior:
+            # img_name = imgid.split('/')[-1]
+            file_name = os.path.splitext(os.path.basename(imgid))[0] + '_pred.npy'  # 生成完整的文件名
+            file_path = os.path.join(self.diffu_prior_path, file_name)  # 生成文件路径
+            if os.path.exists(file_path):       # 加载 .npy 文件
+                np_data = np.load(file_path)
+                torch_data = torch.from_numpy(np_data).float() # 将 numpy 数组转换为 torch 张量
+                self.diffu_prior = torch_data     # torch.Size([484, 648])
+            else:
+                print(f"File {file_name} does not exist in the folder.")
+            
+
         if self.config['data']['load_dynamic'] == True:
             img_path = os.path.join(self.config['data']['data_path'], imgid)
             post_fix = img_path.split('.')[-1]      # avoid '.png' '.jpg' '.jpeg'
@@ -338,6 +373,11 @@ class Front3D_Recon_Dataset(Dataset):
             'scene_scale': scene_scale,
             'voxel_range': voxel_range,
         }
+
+        if self.use_dino:
+            sample["dino_feat"] = self.dino_feat
+        if self.use_diffu_prior:
+            sample["diffu_prior"] = self.diffu_prior
 
         # add bdb3d world points
         if self.add_bdb3d_points:

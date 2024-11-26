@@ -11,8 +11,9 @@ eval:
   extract_mesh: True
   split_n_pixels: 648                  # 648 * 2, split pixels (total pixels too large)
   mesh_coords: camera
-  export_color_mesh: True               # whether mesh with appearance NOTE: set False when evaluate
+  export_color_mesh: False               # whether mesh with appearance NOTE: set False when evaluate
   fusion_scene: False                     # whether fusion scene
+  export_mesh: True
   
 device:
   use_gpu: True
@@ -28,11 +29,12 @@ data:
   test_class_name: 'demo_colormesh'
   load_dynamic: True                    # True:load the data dynamically, False:store them in the memory firstly
   trial: False                          # only use 200 split
+  accumulation_steps: 2                 # 梯度累计iter 数
   batch_size:
-    train: 4
-    val: 1
+    train: 15
+    val: 6
     test: 1
-  num_workers: 16
+  num_workers: 20   #16
   num_pixels:
     train: 64                      # pixels number for an image
     val: 64
@@ -47,7 +49,7 @@ data:
 
 optimizer:
   type: Adam
-  lr: 0.001
+  lr: 0.0002                           #0.001 
   beta1: 0.9
   beta2: 0.999
   eps: 0.00000001                       # 1e-8
@@ -55,16 +57,16 @@ optimizer:
 
 scheduler:
   type: MultiStepLR
-  milestone: [330,370]                    # milestone value change lr
+  milestone: [300,400]       #[330,370]      # milestone value change lr
   gamma: 0.2
 
 loss:
   use_curriculum_color: True           # use curriculum learning color
   use_curriculum_depth: True
   use_curriculum_normal: True
-  curri_color: [150, 300, 0.0, 0.1]     # [start_step, end_step, start_weight, end_weight]
-  curri_depth: [150, 300, 0.0, 0.1]
-  curri_normal: [150, 300, 0.0, 0.01]
+  curri_color: [252, 260, 0.8, 1.0]     # [start_step, end_step, start_weight, end_weight] [30, 80, 0.0, 0.1][130, 300, 0.0, 0.1]
+  curri_depth: [30, 80, 0.0, 0.1]
+  curri_normal: [30, 80, 0.0, 0.01]
   vis_mask_loss: True                   # only calculate color,depth,normal loss on visible mask
   rgb_loss: L1loss
   color_weight: 0.0                     # if use curriculum learning color, set color_weight=0.0
@@ -101,6 +103,8 @@ model:
       backbone: resnet34
       pretrained: True
       num_layers: 3                     # latent_size=[0, 64, 128, 256, 512, 1024][num_layers], num_layers=3  ->  latent_size=256(image feature dims)
+      use_dino: False                    # whether use dino strategy
+      use_diffu_prior: True             # whether use diffusion prior
 
   implicit_network:
     d_in: 3                             # monosdf is 3 (x,y,z)
@@ -145,7 +149,7 @@ model:
     take_sphere_intersection: False     # if True, define a sampler sphere, model.scene_bounding_sphere will work; 
                                         # if False, define near and far directly, model.ray_sampler.near and model.ray_sampler.far will work
 other:
-  nepoch: 400                           # max epoch
+  nepoch: 400                          # max epoch 400
   model_save_interval: 1               # (epoch)
   visualize_interval: 1000              # img tenserboard vis    (iter)
   dump_result: True                     # save result

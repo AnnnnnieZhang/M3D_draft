@@ -130,6 +130,10 @@ dmypy.json
 *.pyc
 
 # mycode
-data/
+data/*
+dataset/*
 output/
 .vscode/
+ssr/diffusion_depth_prior/*
+output/front3d_ckpt/out/*
+ssr/depth_anything/*

@@ -32,10 +32,14 @@ def Recon_trainer(cfg,model,loss,optimizer,scheduler,train_loader,test_loader,de
     model.train()
 
     min_eval_loss = 10000
+    use_dino =  config["model"]["latent_feature"]["encoder"]["use_dino"]
+    accumulation_steps = config["data"]["accumulation_steps"]  # 累积步数，尝试不同的值
+    
     for e in range(start_epoch, config['other']['nepoch']):
         torch.cuda.empty_cache()
         cfg.log_string("Switch Phase to Train")
         model.train()
+        optimizer.zero_grad()   # 重置优化器梯度
         for batch_id, (indices, model_input, ground_truth) in enumerate(train_loader):
             '''
             indices: [B*1]
@@ -61,28 +65,39 @@ def Recon_trainer(cfg,model,loss,optimizer,scheduler,train_loader,test_loader,de
             model_input['centroid'] = model_input['centroid'].cuda().to(torch.float32)
             model_input['none_equal_scale'] = model_input['none_equal_scale'].cuda().to(torch.float32)
             model_input['scene_scale'] = model_input['scene_scale'].cuda().to(torch.float32)
+            if use_dino:
+                model_input['dino_feat'] = model_input['dino_feat'].cuda().to(torch.float32)
 
-            optimizer.zero_grad()
 
             model_outputs = model(model_input, indices)
 
             loss_output = loss(model_outputs, ground_truth, e)
             total_loss = loss_output['total_loss']
-            total_loss.backward()
 
-            '''gradient clip'''
-            torch.nn.utils.clip_grad_norm(parameters=model.parameters(), max_norm=0.7, norm_type=2)
+            # 梯度累积
+            # 缩放后的损失值用于反向传播和梯度累积
+            scaled_total_loss = total_loss / accumulation_steps
+            scaled_total_loss.backward()    
+            # total_loss.backward()
+
             total_norm = 0
-            parameters = [p for p in model.parameters() if p.grad is not None and p.requires_grad]
-            for p in parameters:
-                param_norm = p.grad.detach().data.norm(2)
-                total_norm += param_norm.item() ** 2
-            total_norm = total_norm ** 0.5
+            '''gradient clip'''
+            if (batch_id + 1) % accumulation_steps == 0:
+                torch.nn.utils.clip_grad_norm_(parameters=model.parameters(), max_norm=0.7, norm_type=2)
+                
+                # 计算梯度范数
+                total_norm = 0
+                parameters = [p for p in model.parameters() if p.grad is not None and p.requires_grad]
+                for p in parameters:
+                    param_norm = p.grad.detach().data.norm(2)
+                    total_norm += param_norm.item() ** 2
+                total_norm = total_norm ** 0.5
 
-            optimizer.step()
+                optimizer.step()
+                optimizer.zero_grad()            
 
             psnr = get_psnr(model_outputs['rgb_values'], ground_truth['rgb'].cuda().reshape(-1,3))
-            msg = '{:0>8},[epoch {}] ({}/{}): total_loss = {}, rgb_loss = {}, eikonal_loss = {}, depth_loss = {}, normal_l1 = {}, normal_cos = {}, ray_mask_loss = {}, instance_mask_loss = {}, sdf_loss = {}, vis_sdf_loss = {}, psnr = {}, bete={}, alpha={}'.format(
+            msg = '{:0>8},[epoch {}] ({}/{}): total_loss = {}, rgb_loss = {}, eikonal_loss = {}, depth_loss = {}, normal_l1 = {}, normal_cos = {}, ray_mask_loss = {}, instance_mask_loss = {}, sdf_loss = {}, vis_sdf_loss = {}, psnr = {}, bete={}, alpha={}, depth_weight={} '.format(
                     str(datetime.timedelta(seconds=round(time.time() - start_t))),
                     e,
                     batch_id + 1,
@@ -99,7 +114,8 @@ def Recon_trainer(cfg,model,loss,optimizer,scheduler,train_loader,test_loader,de
                     loss_output['vis_sdf_loss'].item(),
                     psnr.item(),
                     model.module.density.get_beta().item(),
-                    1. / model.module.density.get_beta().item()
+                    1. / model.module.density.get_beta().item(),
+                    model_outputs['depth_weight'].item()
                 )
             cfg.log_string(msg)
 
@@ -116,6 +132,7 @@ def Recon_trainer(cfg,model,loss,optimizer,scheduler,train_loader,test_loader,de
             tb_logger.add_scalar('Loss/vis_sdf_loss', loss_output['vis_sdf_loss'].item(), iter)
             tb_logger.add_scalar('Loss/grad_norm', total_norm, iter)
 
+            # tb_logger.add_scalar('Statistics/dino_weight', model_outputs['dino_weight'].item(), iter)
             tb_logger.add_scalar('Statistics/beta', model.module.density.get_beta().item(), iter)
             tb_logger.add_scalar('Statistics/alpha', 1. / model.module.density.get_beta().item(), iter)
             tb_logger.add_scalar('Statistics/psnr', psnr.item(), iter)
@@ -123,6 +140,9 @@ def Recon_trainer(cfg,model,loss,optimizer,scheduler,train_loader,test_loader,de
             tb_logger.add_scalar("train/lr", current_lr, iter)
 
             iter += 1
+        
+        # 调整学习率
+        scheduler.step()
 
         # after model_save_interval epoch, evaluate the model
         if e % config['other']['model_save_interval'] == 0:
@@ -148,6 +168,7 @@ def Recon_trainer(cfg,model,loss,optimizer,scheduler,train_loader,test_loader,de
 
                 loss_output = loss(model_outputs, ground_truth, e)
                 total_loss = loss_output['total_loss']
+            
 
                 psnr = get_psnr(model_outputs['rgb_values'], ground_truth['rgb'].cuda().reshape(-1,3))
                 msg = 'Validation {:0>8},[epoch {}] ({}/{}): total_loss = {}, rgb_loss = {}, eikonal_loss = {}, depth_loss = {}, normal_l1 = {}, normal_cos = {}, ray_mask_loss = {}, instance_mask_loss = {}, sdf_loss = {}, vis_sdf_loss = {}, psnr = {}, bete={}, alpha={}'.format(
@@ -177,7 +198,10 @@ def Recon_trainer(cfg,model,loss,optimizer,scheduler,train_loader,test_loader,de
                             eval_loss_info[key] = 0
                         eval_loss_info[key] += torch.mean(loss_output[key]).item()
 
-                eval_loss += total_loss.item()
+                if torch.isnan(total_loss).item():
+                    print("NaN detected in total_loss!")
+                else:
+                    eval_loss += total_loss.item()
 
             avg_eval_loss = eval_loss / (batch_id + 1)
             for key in eval_loss_info:
@@ -189,8 +213,8 @@ def Recon_trainer(cfg,model,loss,optimizer,scheduler,train_loader,test_loader,de
                 tb_logger.add_scalar("eval/" + key, eval_loss_info[key], e)
             if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
                 scheduler.step(avg_eval_loss)
-            else:
-                scheduler.step()
+            # else:
+            #     scheduler.step()
 
             checkpoint.register_modules(epoch=e, iter=iter, min_loss=avg_eval_loss)
             if avg_eval_loss < min_eval_loss:

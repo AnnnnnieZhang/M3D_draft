@@ -82,6 +82,6 @@ if __name__=="__main__":
     cfg.log_string('Loading configuration')
     cfg.log_string(cfg.config)
     cfg.write_config()
-
+    cfg.log_string('Resnet34-->mamba stage2; Resnet18-->mamba stage3&4; depth-->depth anything; lr-->0.00006; All model-->B_pretrained.')
     cfg.log_string('Training begin.')
     run(cfg)

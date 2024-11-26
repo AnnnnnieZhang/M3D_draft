@@ -8,9 +8,9 @@ show_rendering: True                   # NOTE: True for novel view synthesis
 fix_random_seed: True                   # fix random seed
 
 eval:
-  extract_mesh: False
+  extract_mesh: True
   split_n_pixels: 248                  # 648 * 2, split pixels (total pixels too large)
-  export_color_mesh: False               # whether mesh with appearance
+  export_color_mesh: True               # whether mesh with appearance
   fusion_scene: True
   
 device:
@@ -20,17 +20,17 @@ device:
 data:
   dataset: FRONT3D
   img_res: [484, 648]                   # dataset image resolution [H, W], FRONT [484, 648], Replica [512, 512]
-  data_path: data/FRONT3D-demo
+  data_path: data/FRONT3D
   split_dir: ./dataset
-  sdf_path: data/FRONT3D-demo/gt-sdf
+  sdf_path: data/FRONT3D/gt-sdf
   train_class_name: ['desk', 'dresser', 'sofa', 'bed', 'bookshelf', 'cabinet', 'desk', 'dresser', 'chair', 'night_stand', 'table', 'desk', 'dresser']
-  test_class_name: 'scene_3848'
+  test_class_name: 'scene_6642'
   load_dynamic: True                    # True:load the data dynamically, False:store them in the memory firstly
   trial: False                          # only use 200 split
   batch_size:
     train: 4
     val: 1
-    test: 5
+    test: 7
   num_workers: 16
   num_pixels:
     train: 64                      # pixels number for an image
@@ -100,6 +100,8 @@ model:
       backbone: resnet34
       pretrained: True
       num_layers: 3                     # latent_size=[0, 64, 128, 256, 512, 1024][num_layers], num_layers=3  ->  latent_size=256(image feature dims)
+      use_dino: False                    # whether use dino strategy
+      use_diffu_prior: True             # whether use diffusion prior
 
   implicit_network:
     d_in: 3                             # monosdf is 3 (x,y,z)

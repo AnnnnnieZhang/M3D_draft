@@ -75,7 +75,7 @@ def run(cfg):
     else:
         mesh_coords = config['eval']['mesh_coords']
 
-    angle_list = [-40, 0, 40]
+    angle_list = [-90,-45, 0, 45, 90]
 
     for angle_idx in range(len(angle_list)):
         angle = angle_list[angle_idx]
